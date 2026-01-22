@@ -84,9 +84,10 @@ async def change_status():
 @bot.event
 async def on_message(message):
     author = str(message.author)
-    channel = bot.get_channel(channel_id)
+    # Remove specific channel check for now to allow all channels
+    # channel = bot.get_channel(channel_id)
 
-    if message.content == "!obfuscate" and message.attachments:
+    if message.content.startswith("!obfuscate") and message.attachments:
         for attachment in message.attachments:
             url = attachment.url
             if not message.author.bot:
