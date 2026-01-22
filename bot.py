@@ -6,9 +6,8 @@ import subprocess
 import shutil
 import keep_alive
 from itertools import cycle
-from dotenv import load_dotenv  # Adicione esta linha
+from dotenv import load_dotenv
 import json
-import asyncio
 from discord import app_commands
 from datetime import datetime, timedelta
 
@@ -17,11 +16,12 @@ load_dotenv()
 
 # Initialize or load stats
 stats_file = "stats.json"
-OWNER_ID = int(os.getenv('OWNER_ID', 1372234679276670990))  # Pega do .env ou usa padrão
+OWNER_ID = int(os.getenv('OWNER_ID', 1372234679276670990))
 
-if not os.path.exists(stats_file):
-    with open(stats_file, "w") as f:
-        json.dump({
+# Garantir que o arquivo de stats tenha todas as chaves necessárias
+def initialize_stats():
+    if not os.path.exists(stats_file):
+        data = {
             "total_obfuscations": 0, 
             "users": {},
             "config": {
@@ -29,27 +29,43 @@ if not os.path.exists(stats_file):
                 "daily_limit": 5,
                 "admins": [OWNER_ID]
             }
-        }, f)
+        }
+        with open(stats_file, "w") as f:
+            json.dump(data, f)
+        return data
+    return None
+
+initialize_stats()
 
 def get_stats():
     if not os.path.exists(stats_file):
-        return {"total_obfuscations": 0, "users": {}, "config": {"enabled": True, "daily_limit": 5, "admins": [OWNER_ID]}}
+        initialize_stats()
+    
     with open(stats_file, "r") as f:
         try:
             data = json.load(f)
         except:
             data = {"total_obfuscations": 0, "users": {}, "config": {"enabled": True, "daily_limit": 5, "admins": [OWNER_ID]}}
     
-    # Ensure keys exist
-    if "total_obfuscations" not in data: data["total_obfuscations"] = 0
-    if "users" not in data: data["users"] = {}
-    if "config" not in data: data["config"] = {"enabled": True, "daily_limit": 5, "admins": [OWNER_ID]}
-    if "admins" not in data["config"]: data["config"]["admins"] = [OWNER_ID]
+    # Garantir que todas as chaves existam
+    defaults = {
+        "total_obfuscations": 0,
+        "users": {},
+        "config": {"enabled": True, "daily_limit": 5, "admins": [OWNER_ID]}
+    }
+    
+    for key, default_value in defaults.items():
+        if key not in data:
+            data[key] = default_value
+    
+    if "admins" not in data["config"]:
+        data["config"]["admins"] = [OWNER_ID]
+    
     return data
 
 def save_stats(data):
     with open(stats_file, "w") as f:
-        json.dump(data, f)
+        json.dump(data, f, indent=2)
 
 def increment_stats(user_id, original_size, obfuscated_size):
     user_id = str(user_id)
@@ -58,12 +74,38 @@ def increment_stats(user_id, original_size, obfuscated_size):
     data["total_obfuscations"] += 1
     
     if user_id not in data["users"]:
-        data["users"][user_id] = {"count": 0, "total_original_size": 0, "total_obfuscated_size": 0, "daily_count": 0, "last_reset": datetime.now().isoformat()}
+        data["users"][user_id] = {
+            "count": 0, 
+            "total_original_size": 0, 
+            "total_obfuscated_size": 0, 
+            "daily_count": 0, 
+            "last_reset": datetime.now().isoformat(),
+            "last_ob": {"original_size": 0, "obfuscated_size": 0}
+        }
     
     user_data = data["users"][user_id]
     
-    # Check reset
-    last_reset = datetime.fromisoformat(user_data.get("last_reset", datetime.now().isoformat()))
+    # Garantir que todas as chaves existam
+    required_keys = ["daily_count", "last_reset", "last_ob", "count", 
+                     "total_original_size", "total_obfuscated_size"]
+    for key in required_keys:
+        if key not in user_data:
+            if key == "daily_count":
+                user_data[key] = 0
+            elif key == "last_reset":
+                user_data[key] = datetime.now().isoformat()
+            elif key == "last_ob":
+                user_data[key] = {"original_size": 0, "obfuscated_size": 0}
+            else:
+                user_data[key] = 0
+    
+    # Verificar reset diário
+    try:
+        last_reset = datetime.fromisoformat(user_data["last_reset"])
+    except:
+        last_reset = datetime.now()
+        user_data["last_reset"] = last_reset.isoformat()
+    
     if datetime.now() - last_reset > timedelta(days=1):
         user_data["daily_count"] = 0
         user_data["last_reset"] = datetime.now().isoformat()
@@ -178,7 +220,9 @@ def create_totalob_embed(user_id):
     if uid_str in data["users"]:
         user_data = data["users"][uid_str]
         last = user_data.get("last_ob", {"original_size": 0, "obfuscated_size": 0})
-        embed.add_field(name="Sua última ofuscação", value=f"Original: {last['original_size']} bytes\nOfuscado: {last['obfuscated_size']} bytes", inline=False)
+        embed.add_field(name="Sua última ofuscação", 
+                       value=f"Original: {last['original_size']} bytes\nOfuscado: {last['obfuscated_size']} bytes", 
+                       inline=False)
         embed.add_field(name="Seu total", value=f"{user_data['count']} scripts", inline=True)
     return embed
 
@@ -203,7 +247,9 @@ def create_userobs_pages(user):
         embed = discord.Embed(title="Top Ofuscadores", color=discord.Color.gold())
         chunk = sorted_users[i:i + items_per_page]
         for idx, (uid, udata) in enumerate(chunk):
-            embed.add_field(name=f"{i + idx + 1}. Usuário {uid}", value=f"Scripts: {udata['count']}\nOriginal Total: {udata['total_original_size']} bytes\nOfuscado Total: {udata['total_obfuscated_size']} bytes", inline=False)
+            embed.add_field(name=f"{i + idx + 1}. Usuário {uid}", 
+                          value=f"Scripts: {udata['count']}\nOriginal: {udata['total_original_size']} bytes\nOfuscado: {udata['total_obfuscated_size']} bytes", 
+                          inline=False)
         pages.append(embed)
     return pages
 
@@ -234,9 +280,15 @@ async def config_slash(interaction: discord.Interaction, status: bool = None, li
     save_stats(data)
 
     embed = discord.Embed(title="Configurações do Bot", color=discord.Color.blue())
-    embed.add_field(name="Status da Ofuscação", value="✅ Ativado" if data["config"]["enabled"] else "❌ Desativado", inline=True)
-    embed.add_field(name="Limite Diário", value=f"{data['config']['daily_limit']} scripts", inline=True)
-    embed.add_field(name="Admins", value=f"{len(data['config']['admins'])} configurados", inline=False)
+    embed.add_field(name="Status da Ofuscação", 
+                   value="✅ Ativado" if data["config"]["enabled"] else "❌ Desativado", 
+                   inline=True)
+    embed.add_field(name="Limite Diário", 
+                   value=f"{data['config']['daily_limit']} scripts", 
+                   inline=True)
+    embed.add_field(name="Admins", 
+                   value=f"{len(data['config']['admins'])} configurados", 
+                   inline=False)
     
     await interaction.response.send_message(embed=embed)
 
@@ -258,6 +310,11 @@ async def setadmin_slash(interaction: discord.Interaction, usuario: discord.User
 async def ping_slash(interaction: discord.Interaction):
     latency = round(bot.latency * 1000)
     await interaction.response.send_message(f"🏓 Pong! Latência: {latency}ms")
+
+@bot.command(name="ping")
+async def ping_cmd(ctx):
+    latency = round(bot.latency * 1000)
+    await ctx.send(f"🏓 Pong! Latência: {latency}ms")
 
 async def process_obfuscation(author_id, author_name, attachments, message_to_delete=None, channel_to_fail=None):
     data = get_stats()
@@ -292,14 +349,20 @@ async def process_obfuscation(author_id, author_name, attachments, message_to_de
         if '.txt' in url or '.lua' in url:
             uploads_dir = ".//uploads//"
             obfuscated_dir = ".//obfuscated//"
-            if not os.path.exists(uploads_dir): os.makedirs(uploads_dir)
-            if not os.path.exists(obfuscated_dir): os.makedirs(obfuscated_dir)
+            if not os.path.exists(uploads_dir): 
+                os.makedirs(uploads_dir)
+            if not os.path.exists(obfuscated_dir): 
+                os.makedirs(obfuscated_dir)
 
             response = requests.get(url)
             original_size = len(response.content)
             path = f".//uploads//{author_name}.lua"
-            if os.path.exists(path): os.remove(path)
-            with open(path, "wb") as f: f.write(response.content)
+            
+            if os.path.exists(path): 
+                os.remove(path)
+            
+            with open(path, "wb") as f: 
+                f.write(response.content)
             
             obfuscation(path, author_name)
             ob_path = f".//obfuscated//{author_name}-obfuscated.lua"
@@ -308,26 +371,45 @@ async def process_obfuscation(author_id, author_name, attachments, message_to_de
 
             user = await bot.fetch_user(author_id)
             try:
-                await user.send(f"Aqui está seu código ofuscado!\nOriginal: {original_size} bytes\nOfuscado: {obfuscated_size} bytes", file=discord.File(ob_path))
+                await user.send(
+                    f"Aqui está seu código ofuscado!\n"
+                    f"Original: {original_size} bytes\n"
+                    f"Ofuscado: {obfuscated_size} bytes", 
+                    file=discord.File(ob_path)
+                )
             except discord.Forbidden:
                 if channel_to_fail:
                     await channel_to_fail.send(f"<@{author_id}>, não consegui te enviar DM! Abra suas mensagens diretas.")
     
     if message_to_delete:
-        try: await message_to_delete.delete()
-        except: pass
+        try: 
+            await message_to_delete.delete()
+        except: 
+            pass
 
 @bot.event
 async def on_message(message):
-    if message.author.bot: return
+    if message.author.bot: 
+        return
     
     # Process obfuscation if it starts with !obfuscate and has attachments
     if message.content.startswith("!obfuscate") and message.attachments:
-        await process_obfuscation(message.author.id, str(message.author), message.attachments, message_to_delete=message, channel_to_fail=message.channel)
+        await process_obfuscation(
+            message.author.id, 
+            str(message.author), 
+            message.attachments, 
+            message_to_delete=message, 
+            channel_to_fail=message.channel
+        )
     
     # Also allow sending the file directly to DM without the command
     elif isinstance(message.channel, discord.DMChannel) and message.attachments:
-        await process_obfuscation(message.author.id, str(message.author), message.attachments, channel_to_fail=message.channel)
+        await process_obfuscation(
+            message.author.id, 
+            str(message.author), 
+            message.attachments, 
+            channel_to_fail=message.channel
+        )
 
     await bot.process_commands(message)
 
@@ -335,6 +417,34 @@ async def on_message(message):
 @app_commands.describe(arquivo="O arquivo .lua ou .txt para ofuscar")
 async def obfuscate_slash(interaction: discord.Interaction, arquivo: discord.Attachment):
     await interaction.response.send_message("Processando seu arquivo...", ephemeral=True)
-    await process_obfuscation(interaction.user.id, str(interaction.user), [arquivo], channel_to_fail=interaction.channel)
+    await process_obfuscation(
+        interaction.user.id, 
+        str(interaction.user), 
+        [arquivo], 
+        channel_to_fail=interaction.channel
+    )
+
+# Status cycling
+status = cycle(['OBFUSCATED READY', 'Use /obfuscate', f'Owner: {OWNER_ID}'])
+
+@tasks.loop(seconds=10)
+async def change_status():
+    await bot.change_presence(
+        activity=discord.Activity(
+            type=discord.ActivityType.watching,
+            name=next(status)
+        )
+    )
+
+@bot.event
+async def on_ready():
+    print(f'{bot.user} está online!')
+    change_status.start()
+    await bot.change_presence(
+        activity=discord.Activity(
+            type=discord.ActivityType.watching,
+            name=next(status)
+        )
+    )
 
 bot.run(token)
