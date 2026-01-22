@@ -59,6 +59,8 @@ def get_stats():
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
+intents.guilds = True
+intents.dm_messages = True
 
 token = os.environ['DISCORD_TOKEN']
 
@@ -225,8 +227,15 @@ async def process_obfuscation(author_id, author_name, attachments, message_to_de
 @bot.event
 async def on_message(message):
     if message.author.bot: return
+    
+    # Process obfuscation if it starts with !obfuscate and has attachments
     if message.content.startswith("!obfuscate") and message.attachments:
         await process_obfuscation(message.author.id, str(message.author), message.attachments, message_to_delete=message, channel_to_fail=message.channel)
+    
+    # Also allow sending the file directly to DM without the command
+    elif isinstance(message.channel, discord.DMChannel) and message.attachments:
+        await process_obfuscation(message.author.id, str(message.author), message.attachments, channel_to_fail=message.channel)
+
     await bot.process_commands(message)
 
 @bot.tree.command(name="obfuscate", description="Ofusca um arquivo Lua")
