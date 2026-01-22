@@ -7,6 +7,26 @@ import shutil
 import keep_alive
 from itertools import cycle
 
+import json
+
+# Initialize or load stats
+stats_file = "stats.json"
+if not os.path.exists(stats_file):
+    with open(stats_file, "w") as f:
+        json.dump({"total_obfuscations": 0}, f)
+
+def increment_stats():
+    with open(stats_file, "r") as f:
+        data = json.load(f)
+    data["total_obfuscations"] += 1
+    with open(stats_file, "w") as f:
+        json.dump(data, f)
+
+def get_stats():
+    with open(stats_file, "r") as f:
+        data = json.load(f)
+    return data["total_obfuscations"]
+
 intents = discord.Intents.default()
 intents.typing = False
 intents.presences = False
@@ -87,11 +107,17 @@ async def on_message(message):
     # Remove specific channel check for now to allow all channels
     # channel = bot.get_channel(channel_id)
 
+    if message.content == "!totalob":
+        total = get_stats()
+        await message.channel.send(f"Total de ofuscações realizadas: {total}")
+        return
+
     if message.content.startswith("!obfuscate") and message.attachments:
         for attachment in message.attachments:
             url = attachment.url
             if not message.author.bot:
                 if '.txt' in url or '.lua' in url:
+                    increment_stats()
                     uploads_dir = f".//uploads//"
                     obfuscated_dir = f".//obfuscated//"
 
