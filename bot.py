@@ -6,15 +6,18 @@ import subprocess
 import shutil
 import keep_alive
 from itertools import cycle
-
+from dotenv import load_dotenv  # Adicione esta linha
 import json
 import asyncio
 from discord import app_commands
 from datetime import datetime, timedelta
 
+# Carregar variáveis do arquivo .env
+load_dotenv()
+
 # Initialize or load stats
 stats_file = "stats.json"
-OWNER_ID = 1372234679276670990
+OWNER_ID = int(os.getenv('OWNER_ID', 1372234679276670990))  # Pega do .env ou usa padrão
 
 if not os.path.exists(stats_file):
     with open(stats_file, "w") as f:
@@ -86,7 +89,10 @@ intents.message_content = True
 intents.guilds = True
 intents.dm_messages = True
 
-token = os.environ['DISCORD_TOKEN']
+# Pegar token do .env
+token = os.getenv('DISCORD_TOKEN')
+if not token:
+    raise ValueError("DISCORD_TOKEN não encontrado no arquivo .env!")
 
 def obfuscation(path, author):
     copy = f".//obfuscated//{author}.lua"
