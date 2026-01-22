@@ -43,8 +43,17 @@ def increment_stats(user_id, original_size, obfuscated_size):
         json.dump(data, f)
 
 def get_stats():
+    if not os.path.exists(stats_file):
+        return {"total_obfuscations": 0, "users": {}}
     with open(stats_file, "r") as f:
-        data = json.load(f)
+        try:
+            data = json.load(f)
+        except:
+            return {"total_obfuscations": 0, "users": {}}
+    
+    # Ensure keys exist
+    if "total_obfuscations" not in data: data["total_obfuscations"] = 0
+    if "users" not in data: data["users"] = {}
     return data
 
 intents = discord.Intents.default()
