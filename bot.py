@@ -62,6 +62,46 @@ intents.message_content = True
 
 token = os.environ['DISCORD_TOKEN']
 
+def obfuscation(path, author):
+    copy = f".//obfuscated//{author}.lua"
+
+    if os.path.exists(copy):
+        os.remove(copy)
+
+    shutil.copyfile(path, copy)
+
+    text_file = open(f".//obfuscate.lua", "r")
+    data = text_file.read()
+    text_file.close()
+    f = open(copy, "a")
+    f.truncate(0)
+    f.write(data)
+    f.close()
+
+    originalupload = open(path, "r")
+    originalupload_data = originalupload.read()
+    originalupload.close()
+
+    with open(copy, "r") as in_file:
+        buf = in_file.readlines()
+
+    with open(copy, "w") as out_file:
+        for line in buf:
+            if line == "--SCRIPT\n":
+                line = line + originalupload_data + '\n'
+            out_file.write(line)
+
+    output = subprocess.getoutput(f'bin/luvit {copy}')
+
+    if os.path.exists(f".//obfuscated//{author}-obfuscated.lua"):
+        os.remove(f".//obfuscated//{author}-obfuscated.lua")
+
+    f = open(f".//obfuscated//{author}-obfuscated.lua", "a")
+    f.write(output)
+    f.close()
+
+    os.remove(copy)
+
 class MyBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=intents)
