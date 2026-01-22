@@ -1,7 +1,6 @@
-discord.py==1.7.3
+discord.py>=2.0.0
 requests>=2.27.1
 flask>=3.0.0
 discord-py-interactions
 discord-py-slash-command
-flask>=3.0.0
-requests>=2.27.1
+discord.py>=2.0.0
