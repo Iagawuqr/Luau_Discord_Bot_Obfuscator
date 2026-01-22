@@ -10,28 +10,63 @@ from itertools import cycle
 import json
 import asyncio
 from discord import app_commands
+from datetime import datetime, timedelta
 
 # Initialize or load stats
 stats_file = "stats.json"
+OWNER_ID = 1372234679276670990
+
 if not os.path.exists(stats_file):
     with open(stats_file, "w") as f:
-        json.dump({"total_obfuscations": 0, "users": {}}, f)
+        json.dump({
+            "total_obfuscations": 0, 
+            "users": {},
+            "config": {
+                "enabled": True,
+                "daily_limit": 5,
+                "admins": [OWNER_ID]
+            }
+        }, f)
+
+def get_stats():
+    if not os.path.exists(stats_file):
+        return {"total_obfuscations": 0, "users": {}, "config": {"enabled": True, "daily_limit": 5, "admins": [OWNER_ID]}}
+    with open(stats_file, "r") as f:
+        try:
+            data = json.load(f)
+        except:
+            data = {"total_obfuscations": 0, "users": {}, "config": {"enabled": True, "daily_limit": 5, "admins": [OWNER_ID]}}
+    
+    # Ensure keys exist
+    if "total_obfuscations" not in data: data["total_obfuscations"] = 0
+    if "users" not in data: data["users"] = {}
+    if "config" not in data: data["config"] = {"enabled": True, "daily_limit": 5, "admins": [OWNER_ID]}
+    if "admins" not in data["config"]: data["config"]["admins"] = [OWNER_ID]
+    return data
+
+def save_stats(data):
+    with open(stats_file, "w") as f:
+        json.dump(data, f)
 
 def increment_stats(user_id, original_size, obfuscated_size):
     user_id = str(user_id)
-    with open(stats_file, "r") as f:
-        data = json.load(f)
+    data = get_stats()
     
     data["total_obfuscations"] += 1
     
-    if "users" not in data:
-        data["users"] = {}
-        
     if user_id not in data["users"]:
-        data["users"][user_id] = {"count": 0, "total_original_size": 0, "total_obfuscated_size": 0}
+        data["users"][user_id] = {"count": 0, "total_original_size": 0, "total_obfuscated_size": 0, "daily_count": 0, "last_reset": datetime.now().isoformat()}
     
     user_data = data["users"][user_id]
+    
+    # Check reset
+    last_reset = datetime.fromisoformat(user_data.get("last_reset", datetime.now().isoformat()))
+    if datetime.now() - last_reset > timedelta(days=1):
+        user_data["daily_count"] = 0
+        user_data["last_reset"] = datetime.now().isoformat()
+    
     user_data["count"] += 1
+    user_data["daily_count"] += 1
     user_data["total_original_size"] += original_size
     user_data["total_obfuscated_size"] += obfuscated_size
     user_data["last_ob"] = {
@@ -39,22 +74,11 @@ def increment_stats(user_id, original_size, obfuscated_size):
         "obfuscated_size": obfuscated_size
     }
     
-    with open(stats_file, "w") as f:
-        json.dump(data, f)
+    save_stats(data)
 
-def get_stats():
-    if not os.path.exists(stats_file):
-        return {"total_obfuscations": 0, "users": {}}
-    with open(stats_file, "r") as f:
-        try:
-            data = json.load(f)
-        except:
-            return {"total_obfuscations": 0, "users": {}}
-    
-    # Ensure keys exist
-    if "total_obfuscations" not in data: data["total_obfuscations"] = 0
-    if "users" not in data: data["users"] = {}
-    return data
+def is_admin(user_id):
+    data = get_stats()
+    return user_id in data["config"]["admins"] or user_id == OWNER_ID
 
 intents = discord.Intents.default()
 intents.members = True
@@ -185,15 +209,78 @@ async def userobs_cmd(ctx):
     else:
         await ctx.send(embed=pages[0], view=PaginationView(pages, ctx.author))
 
-@bot.tree.command(name="userobs", description="Mostra o ranking de ofuscadores")
-async def userobs_slash(interaction: discord.Interaction):
-    pages = create_userobs_pages(interaction.user)
-    if len(pages) == 1:
-        await interaction.response.send_message(embed=pages[0])
+@bot.tree.command(name="config", description="Configurações do bot (Apenas Owner)")
+@app_commands.describe(
+    status="Ativar ou desativar ofuscação",
+    limite="Limite diário por usuário"
+)
+async def config_slash(interaction: discord.Interaction, status: bool = None, limite: int = None):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("Apenas o proprietário pode usar este comando!", ephemeral=True)
+        return
+
+    data = get_stats()
+    if status is not None:
+        data["config"]["enabled"] = status
+    if limite is not None:
+        data["config"]["daily_limit"] = limite
+    
+    save_stats(data)
+
+    embed = discord.Embed(title="Configurações do Bot", color=discord.Color.blue())
+    embed.add_field(name="Status da Ofuscação", value="✅ Ativado" if data["config"]["enabled"] else "❌ Desativado", inline=True)
+    embed.add_field(name="Limite Diário", value=f"{data['config']['daily_limit']} scripts", inline=True)
+    embed.add_field(name="Admins", value=f"{len(data['config']['admins'])} configurados", inline=False)
+    
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="setadmin", description="Adiciona um administrador (Apenas Owner)")
+async def setadmin_slash(interaction: discord.Interaction, usuario: discord.User):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("Apenas o proprietário pode usar este comando!", ephemeral=True)
+        return
+
+    data = get_stats()
+    if usuario.id not in data["config"]["admins"]:
+        data["config"]["admins"].append(usuario.id)
+        save_stats(data)
+        await interaction.response.send_message(f"{usuario.mention} agora é um administrador!")
     else:
-        await interaction.response.send_message(embed=pages[0], view=PaginationView(pages, interaction.user))
+        await interaction.response.send_message(f"{usuario.mention} já é um administrador!")
+
+@bot.tree.command(name="ping", description="Verifica a latência do bot")
+async def ping_slash(interaction: discord.Interaction):
+    latency = round(bot.latency * 1000)
+    await interaction.response.send_message(f"🏓 Pong! Latência: {latency}ms")
 
 async def process_obfuscation(author_id, author_name, attachments, message_to_delete=None, channel_to_fail=None):
+    data = get_stats()
+    
+    # Global check
+    if not data["config"]["enabled"] and author_id != OWNER_ID:
+        if channel_to_fail:
+            await channel_to_fail.send(f"<@{author_id}>, a ofuscação está temporariamente desativada pelo administrador.")
+        return
+
+    # Rate limit check
+    user_id_str = str(author_id)
+    if user_id_str in data["users"] and author_id != OWNER_ID:
+        udata = data["users"][user_id_str]
+        last_reset = datetime.fromisoformat(udata.get("last_reset", datetime.now().isoformat()))
+        if datetime.now() - last_reset > timedelta(days=1):
+            udata["daily_count"] = 0
+            udata["last_reset"] = datetime.now().isoformat()
+            save_stats(data)
+        
+        if udata["daily_count"] >= data["config"]["daily_limit"]:
+            next_reset = last_reset + timedelta(days=1)
+            wait_time = next_reset - datetime.now()
+            hours = int(wait_time.total_seconds() // 3600)
+            minutes = int((wait_time.total_seconds() % 3600) // 60)
+            if channel_to_fail:
+                await channel_to_fail.send(f"<@{author_id}>, você atingiu seu limite diário ({data['config']['daily_limit']}). Tente novamente em {hours}h {minutes}m.")
+            return
+
     for attachment in attachments:
         url = attachment.url
         if '.txt' in url or '.lua' in url:
